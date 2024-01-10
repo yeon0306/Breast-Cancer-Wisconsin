@@ -1,0 +1,331 @@
+---
+title: "Breast Cancer Wisconsin - 분류분석"
+author: "박혜연"
+date: "2023-12-11"
+output: html_document
+---
+
+#### 개요: 이 과제의 주요 목표는 Breast Cancer Wisconsin 데이터셋을 활용하여 유방암 양성과 음성을 분류하는 분류 분석 모델을 개발을 하는 것이다. 데이터를 훈련 및 테스트 셋으로 분할하고 로지스틱 회귀분석, 의사결정나무, 앙상블 기법, SVM 등을 활용하여 각 모델의 성능을 비교해볼 것이다. ####
+
+[wisconsin dataset출처](https://archive.ics.uci.edu/dataset/17/breast+cancer+wisconsin+diagnostic)
+Breast Cancer Wisconsin 데이터셋은 종양의 특성에 관한 다양한 특징(세포 크기, 모양 등)과  </br>
+양성(1) 또는 음성(0) 유방암 여부를 포함하고 있다.
+
+
+```{r}
+df <- read.csv("wisconsin.csv")
+summary(df)
+```
+
+id: 환자 아이디  </br>
+diagnosis: 유방암 여부 (M: 악성, B: 양성) </br>
+radius_mean: 반지름(둘레의 중심에서 점까지의 거리 mean)  </br>
+texture_mean: 유방 종양의 질감의 평균값  </br>
+perimeter_mean: 유방 종양의 둘레의 평균값  </br>
+area_mean: 유방 종양의 면적의 평균값  </br>
+smoothness_mean: 유방 종양 표면의 평균값  </br>
+compactness_mean: 컴팩트성(perimeter^2 / area - 1.0) 평균값  </br>
+concavity_mean: 오목한 부분 (윤곽의 오목한 부분의 severity)  </br>
+concave.points_mean: 오목한 점(윤곽의 오목한 부분의 수)  </br>
+symmetry_mean: 유방 종양의 대칭성의 평균값  </br>
+fractal_dimension_mean: 유방 종양의 프랙탈 차원의 평균값  </br>
+
+데이터의 통계적인 정보와 분포는 해당 특성들의 평균, 중앙값, 최솟값, 최댓값 등을 통해 확인할 수 있다. 각 세포 특성에 관한 것이며 유방암의 악성(M)과 양성(B)을 구분하는 것이 주된 목적이다.
+
+
+```{r cars}
+class(df$diagnosis)
+df$diagnosis <- ifelse(df$diagnosis == "M", 0, 1)
+df$diagnosis <- factor(df$diagnosis)  # 종속 변수 factor 형태로 변환 
+```
+
+diagnosis 열이 "M"이면 0으로, 그렇지 않으면 1로 값을 변환한다. 여기서 "M"은 악성(Malignant)을 나타내며, 0으로 매핑되고, "B"는 양성(Benign)을 나타내며, 1로 매핑된다.
+diagnosis 열을 팩터(factor) 형태로 변환하였다. 
+
+```{r} 
+# 데이터 전처리 
+df <- df[, -which(names(df) == "id")] # 분류분석에 필요없는 'id'열을 삭제 
+
+df <- df[, -which(names(df) == "X")] # NULL 값인 'x' 열을 삭제 
+
+df <- na.omit(df) # 결측치가 있다면 제거 
+
+```
+
+
+```{r}
+
+# 데이터 분할 : train 70%, test 30% 
+set.seed(123)
+idx <- sample(1:nrow(df),nrow(df)*0.7,replace = FALSE)
+train <-df[idx,]
+test <- df [-idx,]
+```
+데이터셋은 train 70%, test 30%으로 분할하였다. 
+
+## 로지스틱 회귀분석 ##
+
+```{r warning = FALSE, message = FALSE}
+
+# 로지스틱 회귀분석 실시 
+logistic <-glm(diagnosis~., 
+               data=train,
+               family="binomial")
+summary(logistic)
+```
+회귀계수의 p-value가 유의수준 0.05보다 높게 나타나지만 AIC 는 낮은 값일 수록 좋은 모델을 나타낸다. 현재 모델의 AIC는 62로 상당히 낮은 수준이다. 이번에는 step 함수를 활용하여 
+로지스틱 회귀분석을 다시 해보겠다.
+
+```{r warning = FALSE, message = FALSE}
+
+# step 함수를 활용한 로지스틱 회귀분석 실시 
+step.logistic <- step(glm(diagnosis ~ 1, data = train, family = "binomial"),
+                      scope = list(lower = ~1, upper = ~ radius_mean + texture_mean + perimeter_mean +
+                                     area_mean + smoothness_mean + compactness_mean + concavity_mean +
+                                     concave.points_mean + symmetry_mean + fractal_dimension_mean +
+                                     radius_se + texture_se + perimeter_se + area_se +
+                                     smoothness_se + compactness_se + concavity_se +
+                                     concave.points_se + symmetry_se + fractal_dimension_se +
+                                     radius_worst + texture_worst + perimeter_worst +
+                                     area_worst + smoothness_worst + compactness_worst +
+                                     concavity_worst + concave.points_worst + symmetry_worst + fractal_dimension_worst,
+                                   direction = "both"))
+
+summary(step.logistic)
+```
+
+총 9개의 독립변수가 선택되었으며, *과 .은 각 유의확률에서 채택이 되는지를 알 수 있다. 
+AIC 는 62보다 67로 높아졌음을 알 수 있다. 
+```{r, include=FALSE}
+library(caret)
+```
+
+```{r}
+#예측을 통한 정분류율 확인 
+pred <- predict(step.logistic, test[, -1], type = "response") # 예측값은 response, 확률값 출력 
+pred1 <- as.data.frame(pred)   # 결과를 data.frame으로 변환 
+pred1$grade <- ifelse(pred1$pred >= 0.5, 1, 0) #0.5를 기준으로 0,1 범주 추가 
+
+confusionMatrix(data = as.factor(pred1$grade), reference = test[, 1], positive = '1')
+```
+
+정분류율을 확인하기 전에 예측값이 확률로 나타나기 때문에 기준이 되는 확률보다 크면 1,
+작으면 0으로 범주를 추가한다. 
+정분류율(Accuracy)은 0.97이며, 민감도(sensitivity)는 1.0으로 높게 나타났다.
+또, 특이도는 0.94이다. 
+
+```{r, include= FALSE}
+library(ROCR)
+library(rpart)
+library(rpart.plot)
+```
+
+```{r}
+## roc커브그리기 및 auc 산출
+
+pred.logistic.roc<-prediction(as.numeric(pred1$grade),as.numeric(test[,1]))
+plot(performance(pred.logistic.roc,"tpr","fpr"))
+abline(a=0,b=1,lty=2,col="black")
+
+performance(pred.logistic.roc,"auc")@y.values
+```
+
+prediction 함수와 performance 함수로 값을 구하여 plot 함수로 ROC 커브를 그렸으며,
+AUC 값은 y.values 값으로 확인한 결과 0.9726 으로 나타났다. 
+
+
+## 의사결정나무 ## 
+
+```{r}
+## 의사결정나무 
+
+dt.model <- rpart(diagnosis~.,
+                  method="class",
+                  data=train,
+                  control = rpart.control(maxdepth=5,
+                                          minsplit=15))
+prp(dt.model,type=4,extra =2)
+```
+
+앞서 분할한 데이터의 train 데이터로 의사결정나무 모델을 만들어보았다. 
+총 398개의 관측치 중 259개의 관측치를 1로 분류하였으며 concave.p < 0.056 인 264개의 노드중 246개가 1로 분류되었음을 의미한다.
+
+
+```{r}
+dt.model$cptable
+opt<-which.min(dt.model$cptable[,"xerror"])
+cp <-dt.model$cptable[opt,"CP"]
+pr.c<-prune(dt.model,cp=cp)
+plotcp(dt.model)
+```
+
+cptable 인자를 통해서 교차타당성 오차를 제공하여 의사결정나무 모델의 가지치기, 트리의 최대 크기조절에 사용한다. nsplit은 분할 횟수, xerror 는 해당 CP 에서 cross validation했을 때 오류율, xstd는 해당 CP 에서 cross validation 했을 때 편차를 나타낸다. cpatable 에서 xerror 가 가장 낮은 split 개수를 선택한다.  위 결과를 확인했을 때 **xerro가 가장 낮을때는 nsplit은 4** 이며, 
+앞선 모형의 그래프를 봤을 대 의사결정나무 모델이 분할을 4번까지 한다고 할 수 있다. 
+
+```{r,include= FALSE}
+install.packages("caret")
+library(caret)
+```
+
+
+```{r}
+pred.model<-predict(dt.model,test[,-1],type="class")
+confusionMatrix(data=pred.model, reference = test[,1], positive='1')
+
+
+## ROC 커브 그리기 및 AUC 산출
+
+pred.model.roc<- prediction(as.numeric(pred.model),as.numeric(test[,1]))
+plot(performance(pred.model.roc,"tpr","fpr"))
+abline(a=0,b=1,lty=2, col="black")
+
+performance(pred.model.roc,"auc")@y.values
+```
+
+정분류율(Accuracy)은 0.9123이며 민감도 (Sensitivity)는 0.96이다.
+특이도(Specificity)는 0.83이다. 
+
+
+## 앙상블(ensemble)기법 ## 
+
+```{r, include= FALSE}
+library(adabag)
+```
+
+
+```{r}
+# bagging 함수를 활용하여 bagging 분석 실시 
+
+bag_model <- bagging(diagnosis~.,
+                     data = train,
+                     mfinal=15)
+names(bag_model)
+
+bag_model$importance #importance는 변수의 상대적인 중요도를 나타내며 지니지수의 gain을 고려한 축도
+```
+names 함수를 통해 bagging 함수로 생성된 결과들에 어떤 것들이 있는지 확인이 가능하다. </br>
+importance 인자에서 변수의 상대적 중요도를 봤을때</br>
+**perimeter_worst, concave.points_mean, concave.points_worst** 순서로 변수 중요도가 크다는 것을 
+파악할 수 있다. 
+
+```{r}
+# 예측을 통한 정분류율 확인 
+pred.bmd <-predict(bag_model,test,type="class")
+confusionMatrix(data = as.factor(pred.bmd$class), # class 열을 factor로 변환하여 test의 열과 맞춤 
+                reference = test$diagnosis,
+                positive='1')
+```
+정분류율(Accuracy)은 0.9532이며 민감도 (Sensitivity)는 0.95이다.
+특이도(Specificity)는 0.94이다. 
+
+```{r}
+#ROC 커브 그리기 및 AUC 산출
+
+pred.bmd.roc <- prediction(as.numeric(pred.bmd$class),as.numeric(test[,1]))
+plot(performance(pred.bmd.roc,"tpr","fpr"))
+abline(a=0,b=1,lty=2,col="black")
+
+performance(pred.bmd.roc,"auc")@y.values
+```
+prediction 함수와 performance 함수로 값을 구하여 plot 함수로 ROC 커브를 그렸으며, AUC 값은 y.values 값으로 확인한 결과 0.9521 으로 나타났다.
+
+## 랜덤 포레스트 (RandomForest) ##
+```{r,include=FALSE}
+library(randomForest)
+```
+
+
+```{r}
+# randomForest 함수를 활용하여 RandomForest 분석 실시 
+
+rf.model <-randomForest(diagnosis~.,
+                        data=train,
+                        ntree=50,          #나무 50개 사용 
+                        mtry=sqrt(20),     #사용할 변수의 개수
+                        importance=T)      #변수중요도 결과를 확인 
+rf.model
+names(rf.model)
+rf.model$importance
+varImpPlot(rf.model)
+```
+
+랜덤포레스트 분석 결과에서 "OOB estimate of  error rate"의 값은 에러추정치로서 값이
+낮을수록 분류모델의 성능이 좋다고 판단할 수 있다. </br>
+**OOB의 값은 4.77%** 으로 에러추정치가 매우 낮은 것을 알 수 있다. 
+Confusion matrix 에서 class.error값으로 분류 에러를 통해 모델 성능을 확인할 수 있다.
+class.error값이 매우 낮은것으로 나타났으므로 모델 성능이 좋다는 것을 알 수 있다. </br>
+
+
+varImpPlot 함수의 importance 인자 결과는 변수의 상대적 중요도 Mean DecreaseGini를 기준으로 봤을 때, **concave.points_mean, concave.points_worst, perimeter_worst ** 순서로 변수 중요도가 
+크다는 것을 알 수 있다. 
+
+
+```{r}
+# 예측을 통한 정분류율 확인 
+
+pred.rf<-predict(rf.model,test[,-1],type="class")
+confusionMatrix(data= pred.rf, reference=test[,1], positive='1')
+
+pred.rf.roc<-prediction(as.numeric(pred.rf),as.numeric(test[,1]))
+plot(performance(pred.rf.roc,"tpr","fpr"))
+abline(a=0,b=1,lty=2,col="black")
+
+```
+
+정분류율(Accuracy)은 0.9649이며, 민감도 (Sensitivity)는 0.96이다.
+특이도(Specificity)는 0.95이다. 
+
+```{R, include =FALSE}
+library(e1071)
+```
+
+## SVM 분석 ##
+
+```{r}
+#tune.svm 함수를 활용하여 최적의 파라미터값 찾기기
+tune.svm(diagnosis~.,
+        data=df,
+        gamma = 10^(-6:-1),  #  6*2 = 12개의 조합합
+        cost = 10^(1:2))
+
+#svm 함수를 활용하여 SVM 분석 실시 
+svm.model<-svm(diagnosis~.,
+               data=train,
+               kernel="sigmoid", #sigmoid 함수 사용 
+               gamma=0.01,
+               cost=10)
+summary(svm.model)
+```
+
+gamma는 0.01 cost는 10이 최적의 파라미터임을 확인할 수 있다. 
+
+```{r, include=FALSE}
+library(caret)
+```
+
+
+```{r}
+# 예측을 통한 정분류율 확인 
+pred.svm <- predict(svm.model,test,type="class")
+confusionMatrix(data=pred.svm, reference=test[,1], positive='1')
+```
+
+정분류율(Accuracy)은 0.9649이며, 민감도 (Sensitivity)는 0.97이다.
+특이도(Specificity)는 0.94이다. 
+
+```{r}
+#ROC 커브 그리기 및 AUC 산출
+pred.svm.roc<-prediction(as.numeric(pred.svm),as.numeric(test[,1]))
+plot(performance(pred.svm.roc,"tpr","fpr")) #ROC Curve 작성
+abline(a=0,b=1,lty=2,col="black")
+
+performance(pred.svm.roc,"auc")@y.values
+```
+
+preediction 함수와 performance 함수로 값을 구하여 plot 함수로 ROC 커브를 그렸으며
+AUC 값은 y.values 값으로 확인한 결과 0.9623으로 나타났다.
+
+이처럼 로지스틱회귀분석, 의사결정나무, 앙상블, 랜덤포레스트, SVM 등을 
+활용하여 분류분석을 해보았다. 유방암 데이터셋의 정분류율은 높은 수치를 나타낸다.
+특히 로지스틱 회귀 분석의 정분류율은 0.9726으로 가장 높게 나왔으며 
+그 다음은 SVM의 정분류율이 0.9649로 두번째로 높게 나타났다. 
